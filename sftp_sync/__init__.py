@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 # encoding: utf-8
 
 from __future__ import print_function
@@ -23,8 +23,9 @@ def main():
     parser.add_argument('COMMAND', choices=('up', 'down', 'both', 'init'))
     parser.add_argument('HOST')
     parser.add_argument('PATH')
-    parser.add_argument('-e', help='exclude files based on regex')
-    parser.add_argument('-n', help='dry run', action="store_true")
+    parser.add_argument('-e', '--exclude', help='exclude files based on regex')
+    parser.add_argument('-n', '--dry-run', help='dry run', action="store_true")
+    parser.add_argument('-s', '--skip-on-error', help='skip file on error', action="store_true")
 
     args = parser.parse_args()
 
@@ -73,7 +74,7 @@ def main():
     t = connect(hostname, port, username, hostkey)
     try:
         sftp = paramiko.SFTPClient.from_transport(t)
-        sync(sftp, path, os.path.join(os.getcwd(), os.path.basename(path)), cmd, excludes, args.n)
+        sync(sftp, path, os.path.join(os.getcwd(), os.path.basename(path)), cmd, excludes, args.n, args.s)
     finally:
         t.close()
 
@@ -158,17 +159,17 @@ def check_dir(sftp, root, path, dryrun=False):
             if not dryrun:
                 sftp.mkdir(curpath)
 
-def sync(sftp, remote, local, direction='down', exclude=None, dry_run=False):
+def sync(sftp, remote, local, direction='down', exclude=None, dry_run=False, skip_on_error=False):
     print ("[\033[34m*\033[0m] Syncing %s <-> %s" % (remote, local))
     c = raw_input("Continue?[y/n]").lower()
     if c != 'y':
         return False
     cmds = {'down' : sync_down, 'up' :sync_up, 'init' : build_rev_file}
     if direction == 'both':
-        cmds['down'](sftp, remote, local, exclude, dry_run)
-        cmds['up'](sftp, remote, local, exclude, dry_run)
+        cmds['down'](sftp, remote, local, exclude, dry_run, skip_on_error)
+        cmds['up'](sftp, remote, local, exclude, dry_run, skip_on_error)
     else:
-        return cmds[direction](sftp, remote, local, exclude, dry_run)
+        return cmds[direction](sftp, remote, local, exclude, dry_run, skip_on_error)
 
 def print_file_info(filename, f):
     print("\n[\033[32m+\033[0m] New file: %s" % filename)
@@ -196,7 +197,7 @@ def different(sftp, filename, filea, fileb):
         return True
     return False
 
-def sync_down(sftp, remote, local, exclude, dry_run):
+def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
     if not os.path.lexists(local):
         os.mkdir(local)
     local_files = load_rev_file(os.path.join(local, '.files'))
@@ -319,14 +320,19 @@ def sync_down(sftp, remote, local, exclude, dry_run):
                         os.unlink(lfile)
                         save_rev_file(os.path.join(local, '.files'), local_files)
                     exit(1)
-                except:
+                except Exception as e:
                     del remote_files[filename]
                     if not dry_run and filename not in local_files:
                         os.unlink(lfile)
-                    local_files.update(remote_files)
-                    if not dry_run:
-                        save_rev_file(os.path.join(local, '.files'), local_files)
-                    raise
+                    if not skip_on_error:
+                        local_files.update(remote_files)
+                        if not dry_run:
+                            save_rev_file(os.path.join(local, '.files'), local_files)
+                        raise
+                    else:
+                        if filename in local_files: # prevent deletion
+                            remote_files[filename] = local_files[filename]
+                        print("[\033[31m!\033[0m Error during downloading %s: %s" % (filename, str(e)))
     sys.stdout.write("\n")
 
 
@@ -342,7 +348,7 @@ def sync_down(sftp, remote, local, exclude, dry_run):
     if not dry_run:
         save_rev_file(os.path.join(local, '.files'), remote_files)
 
-def sync_up(sftp, remote, local, exclude, dry_run):
+def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
     sftp.lstat(remote)
 
     remote_files = load_rev_file(os.path.join(local, '.files'))
@@ -441,14 +447,19 @@ def sync_up(sftp, remote, local, exclude, dry_run):
                     if not dry_run:
                         save_rev_file(os.path.join(local, '.files'), remote_files)
                     exit(1)
-                except:
+                except Exception as e:
                     del local_files[filename]
                     if not dry_run and filename not in remote_files:
                         sftp.unlink(rfile)
-                    remote_files.update(local_files)
-                    if not dry_run:
-                        save_rev_file(os.path.join(local, '.files'), remote_files)
-                    raise
+                    if not skip_on_error:
+                        remote_files.update(local_files)
+                        if not dry_run:
+                            save_rev_file(os.path.join(local, '.files'), remote_files)
+                        raise
+                    else:
+                        if filename in remote_files: # prevent deletion
+                            local_files[filename] = remote_files[filename]
+                        print("[\033[31m!\033[0m] Error during upload of %s: %s" % (filename, str(e)))
     sys.stdout.write("\n")
 
     for filename in remote_files.keys():
