@@ -42,8 +42,8 @@ def main():
     path = args.PATH
     cmd = args.COMMAND
     excludes = None
-    if args.e:
-        excludes = re.compile(args.e)
+    if args.exclude:
+        excludes = re.compile(args.exclude)
     
     
     # get username
@@ -74,7 +74,7 @@ def main():
     t = connect(hostname, port, username, hostkey)
     try:
         sftp = paramiko.SFTPClient.from_transport(t)
-        sync(sftp, path, os.path.join(os.getcwd(), os.path.basename(path)), cmd, excludes, args.n, args.s)
+        sync(sftp, path, os.path.join(os.getcwd(), os.path.basename(path)), cmd, excludes, args.dry_run, args.skip_on_error)
     finally:
         t.close()
 
