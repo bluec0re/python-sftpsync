@@ -471,10 +471,12 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
                     sftp.lstat(os.path.join(remote, filename))
                 except:
                     print("Can't stat remote file. Maybe already deleted?")
+                    del remote_files[filename]
                     continue
                 answer = raw_input("[\033[36m?\033[0m] Delete it on remote?[y/n]")
                 if answer == 'y':
                     sftp.unlink(os.path.join(remote, filename))
+                    del remote_files[filename]
 
     remote_files.update(local_files)
     if not dry_run:
