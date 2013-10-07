@@ -1,7 +1,7 @@
 from __future__ import print_function
 
 from binascii import hexlify
-from getpass import getpass
+import getpass
 import os
 
 import paramiko
