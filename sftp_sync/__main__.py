@@ -20,7 +20,7 @@ def main():
 #    paramiko.util.log_to_file('demo_sftp.log')
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('COMMAND', choices=('up', 'down', 'both', 'init'))
+    parser.add_argument('COMMAND', choices=('up', 'down', 'both', 'init', 'check'))
     parser.add_argument('HOST')
     parser.add_argument('PATH')
     parser.add_argument('-e', '--exclude', help='exclude files based on regex')
@@ -44,6 +44,7 @@ def main():
     excludes = None
     if args.exclude:
         excludes = re.compile(args.exclude)
+        print("Excluding: {0}".format(excludes.pattern))
     
     
     # get username

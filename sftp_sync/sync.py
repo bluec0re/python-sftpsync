@@ -9,13 +9,17 @@ import paramiko
 __author__ = 'bluec0re'
 
 
+MTIME = 0
+SIZE = 1
+MODE = 2
+
 def load_rev_file(fname):
     files = {}
     try:
         with open(fname, "r") as fp:
             for line in fp:
                 parts = line.strip().split("\t")
-                files[parts[0]] = (int(parts[1]), int(parts[2]), int(parts[3]) if len(parts) > 3 else -1)
+                files[parts[0]] = (int(parts[MTIME+1]), int(parts[SIZE+1]), int(parts[MODE+1]) if len(parts) > 3 else -1)
     except:
         pass
     print("[\033[32m+\033[0m] Loaded %d files from %s" % (len(files), fname))
@@ -27,9 +31,9 @@ def save_rev_file(fname, files):
         for f, data in files.iteritems():
             fp.write("%s\t%d\t%d\t%d\n" % (
                 f,
-                data[0],
-                data[1],
-                data[2]))
+                data[MTIME],
+                data[SIZE],
+                data[MODE]))
     print("[\033[32m+\033[0m] Saved %d files to %s" % (len(files), fname))
 
 
@@ -45,7 +49,8 @@ def build_rev_file(sftp, remoteroot, localroot, exclude, dry_run):
         for f in files:
             filename = os.path.join(root, f.filename)
             if exclude and exclude.match(filename) \
-               or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo'):
+               or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo') or \
+               f.filename.startswith('.~'):
                 continue
 
             remote_files[filename] = (
@@ -94,6 +99,10 @@ def check_dir(sftp, root, path, dryrun=False):
 
 
 def sync(sftp, remote, local, direction='down', exclude=None, dry_run=False, skip_on_error=False):
+    if direction == 'check':
+        check_revision_against_remote(sftp, remote, local)
+        return
+        
     print ("[\033[34m*\033[0m] Syncing %s <-> %s" % (remote, local))
     c = raw_input("Continue?[y/n]").lower()
     if c != 'y':
@@ -110,14 +119,17 @@ def print_file_info(filename, f):
     print("\n[\033[32m+\033[0m] New file: %s" % filename)
     print("  Size: %d\n  UID: %d\n  GID: %d\n  Mode: %o\n  Accesstime: %d\n  Modtime: %d" %(
                     f.st_size, f.st_uid, f.st_gid, f.st_mode, f.st_atime, f.st_mtime))
+def print_file_info2(filename, f):
+    print("\n[\033[32m+\033[0m] File: %s" % filename)
+    print("  Size: %d\n  Mode: %o\n  Modtime: %d" %(
+                    f[SIZE], f[MODE], f[MTIME]))
 
-
-def different(sftp, filename, filea, fileb, local, remote):
-    if filea[2] & 0o777000 != fileb[2] & 0o777000 and filea[2] != -1:
+def different(sftp, filename, other, current, local, remote):
+    if other[MODE] & 0o777000 != current[MODE] & 0o777000 and other[MODE] != -1:
         print("\n[\033[32m+\033[0m] Differencees in %s" % filename)
-        print("    Mode: %o vs %o" % (filea[2], fileb[2]))
+        print("    Mode: %o vs %o" % (other[MODE], current[MODE]))
         return True
-    elif stat.S_ISLNK(filea[2]): # symlink
+    elif stat.S_ISLNK(other[MODE]): # symlink
         rtarget = sftp.readlink(os.path.join(remote, filename))
         ltarget = os.readlink(os.path.join(local, filename))
         if ltarget != rtarget:
@@ -125,11 +137,11 @@ def different(sftp, filename, filea, fileb, local, remote):
             print("    Target: %s vs %s" % (ltarget, rtarget))
             return True
 
-    elif (filea[0] < fileb[0] or
-        filea[0] == fileb[0] and filea[1] != fileb[1]):
+    elif (other[MTIME] < current[MTIME] or
+        (other[MTIME] == current[MTIME] and other[SIZE] != current[SIZE])):
         print("\n[\033[32m+\033[0m] Differencees in %s" % filename)
-        print("    Time: %r vs %r" % (filea[0], fileb[0]))
-        print("    Size: %r vs %r" % (filea[1], fileb[1]))
+        print("    Time: %r vs %r" % (other[MTIME], current[MTIME]))
+        print("    Size: %r vs %r" % (other[SIZE], current[SIZE]))
         return True
     return False
 
@@ -142,6 +154,10 @@ def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
 
     for root, dirs, files in walk(sftp, remote):
         lroot = os.path.join(local, root)
+        if exclude and exclude.match(lroot):
+            print("[\033[33m#\033[0m] Skipping {0}".format(lroot))
+            continue
+
         if not os.path.lexists(lroot) and not dry_run:
             os.mkdir(lroot)
 
@@ -149,7 +165,8 @@ def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
             filename = os.path.join(root, f.filename)
 
             if exclude and exclude.match(filename) \
-               or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo'):
+               or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo') \
+               or f.filename.startswith('.~'):
                 continue
 
             sys.stdout.write("\r\x1b[K[\033[34m*\033[0m] \033[33mTesting\033[0m %s" % (
@@ -273,6 +290,10 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
     remote_files = load_rev_file(os.path.join(local, '.files'))
     local_files = {}
     for root, dirs, files in os.walk(local):
+        if exclude and exclude.match(root):
+            #print("[\033[33m#\033[0m] Skipping {0}".format(root))
+            continue
+
         for d in dirs:
             path = os.path.relpath(os.path.join(root, d), local)
             if exclude and exclude.match(path):
@@ -289,7 +310,8 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
                 filename = filename[2:]
 
             if exclude and exclude.match(lfile) \
-               or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo'):
+               or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo') \
+               or f.startswith('.~'):
                 continue
 
             rfile = os.path.join(remote, filename)
@@ -306,7 +328,7 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
             else:
                 lf = local_files[filename]
                 rf = remote_files[filename]
-                upload = different(sftp, filename, lf, rf, local, remote)
+                upload = different(sftp, filename, rf, lf, local, remote)
 
             if upload:
                 print("\n[\033[34m*\033[0m] Uploading: %s" % filename)
@@ -423,3 +445,30 @@ def walk(sftp, root_directory):
         yield reldir, directories, files
         for dir in directories:
             dirs.append(os.path.join(directory, dir.filename))
+
+
+def check_revision_against_remote(sftp, remote, local):
+    local_files = load_rev_file(os.path.join(local, '.files'))
+
+    for root, dirs, files in walk(sftp, remote):
+        for f in files:
+            filename = os.path.join(root, f.filename)
+            rfile = os.path.join(remote, filename)
+
+            rdata = (
+                    int(f.st_mtime),
+                    int(f.st_size),
+                    int(f.st_mode)
+                    )
+
+            if filename not in local_files:
+                print("[\033[33m!\033[0m] File only on remote")
+                print_file_info2(filename, rdata)
+            elif different(sftp, filename, rdata, local_files[filename], local, remote):
+                del local_files[filename]
+            else:
+                del local_files[filename]
+
+    for filename, ldata in local_files.items():
+        print("[\033[33m!\033[0m] File only in revision file")
+        print_file_info2(filename, ldata)
