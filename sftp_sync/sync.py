@@ -275,6 +275,8 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
     for root, dirs, files in os.walk(local):
         for d in dirs:
             path = os.path.relpath(os.path.join(root, d), local)
+            if exclude and exclude.match(path):
+                continue
             check_dir(sftp, remote, path, dry_run)
 
         for f in files:
@@ -286,7 +288,7 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
             if filename.split(os.path.sep)[0] == os.path.curdir:
                 filename = filename[2:]
 
-            if exclude and exclude.match(filename) \
+            if exclude and exclude.match(lfile) \
                or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo'):
                 continue
 
