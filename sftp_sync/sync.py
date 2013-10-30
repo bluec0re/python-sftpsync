@@ -166,7 +166,7 @@ def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
 
             if exclude and exclude.match(filename) \
                or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo') \
-               or f.filename.startswith('.~'):
+               or f.filename.startswith('.~') or f.filename.startswith("~$"):
                 continue
 
             sys.stdout.write("\r\x1b[K[\033[34m*\033[0m] \033[33mTesting\033[0m %s" % (
@@ -311,7 +311,7 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
 
             if exclude and exclude.match(lfile) \
                or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo') \
-               or f.startswith('.~'):
+               or f.startswith('.~') or f.startswith("~$"):
                 continue
 
             rfile = os.path.join(remote, filename)
