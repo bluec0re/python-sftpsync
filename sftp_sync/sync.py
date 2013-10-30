@@ -19,8 +19,12 @@ def load_rev_file(fname):
         with open(fname, "r") as fp:
             for line in fp:
                 parts = line.strip().split("\t")
-                files[parts[0]] = (int(parts[MTIME+1]), int(parts[SIZE+1]), int(parts[MODE+1]) if len(parts) > 3 else -1)
-    except:
+                try:
+                    fname = parts[0].decode('utf-8')
+                except UnicodeDecodeError:
+                    fname = parts[0]
+                files[fname] = (int(parts[MTIME+1]), int(parts[SIZE+1]), int(parts[MODE+1]) if len(parts) > 3 else -1)
+    except IOError:
         pass
     print("[\033[32m+\033[0m] Loaded %d files from %s" % (len(files), fname))
     return files
@@ -29,11 +33,16 @@ def load_rev_file(fname):
 def save_rev_file(fname, files):
     with open(fname, "w") as fp:
         for f, data in files.iteritems():
-            fp.write("%s\t%d\t%d\t%d\n" % (
+            try:
+                f = f.encode('utf-8')
+            except UnicodeDecodeError:
+                pass
+            line = ("%s\t%d\t%d\t%d\n" % (
                 f,
                 data[MTIME],
                 data[SIZE],
                 data[MODE]))
+            fp.write(line)
     print("[\033[32m+\033[0m] Saved %d files to %s" % (len(files), fname))
 
 
@@ -155,7 +164,7 @@ def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
     for root, dirs, files in walk(sftp, remote):
         lroot = os.path.join(local, root)
         if exclude and exclude.match(lroot):
-            print("[\033[33m#\033[0m] Skipping {0}".format(lroot))
+            sys.stdout.write("\r[\033[33m#\033[0m] Skipping {0}".format(lroot))
             continue
 
         if not os.path.lexists(lroot) and not dry_run:
