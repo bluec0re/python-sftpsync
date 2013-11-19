@@ -13,22 +13,7 @@ import re
 from .sftp import connect
 from .sync import sync
 
-
-
-def main():
-    # setup logging
-#    paramiko.util.log_to_file('demo_sftp.log')
-    
-    parser = argparse.ArgumentParser()
-    parser.add_argument('COMMAND', choices=('up', 'down', 'both', 'init', 'check'))
-    parser.add_argument('HOST')
-    parser.add_argument('PATH')
-    parser.add_argument('-e', '--exclude', help='exclude files based on regex')
-    parser.add_argument('-n', '--dry-run', help='dry run', action="store_true")
-    parser.add_argument('-s', '--skip-on-error', help='skip file on error', action="store_true")
-
-    args = parser.parse_args()
-
+def setup_sftp(args):
     # get hostname
     username = ''
     hostname = args.HOST
@@ -39,12 +24,6 @@ def main():
         hostname, portstr = hostname.split(':')
         port = int(portstr)
 
-    path = args.PATH
-    cmd = args.COMMAND
-    excludes = None
-    if args.exclude:
-        excludes = re.compile(args.exclude)
-        print("Excluding: {0}".format(excludes.pattern))
     
     
     # get username
@@ -72,12 +51,41 @@ def main():
         hostkey = host_keys[hostname][hostkeytype]
         print('Using host key of type %s' % hostkeytype)
 
-    t = connect(hostname, port, username, hostkey)
+    return connect(hostname, port, username, hostkey)
+
+def main():
+    # setup logging
+#    paramiko.util.log_to_file('demo_sftp.log')
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('COMMAND', choices=('up', 'down', 'both', 'init', 'check', 'list'))
+    parser.add_argument('HOST')
+    parser.add_argument('PATH')
+    parser.add_argument('-e', '--exclude', help='exclude files based on regex')
+    parser.add_argument('-n', '--dry-run', help='dry run', action="store_true")
+    parser.add_argument('-s', '--skip-on-error', help='skip file on error', action="store_true")
+
+    args = parser.parse_args()
+
+    excludes = None
+    if args.exclude:
+        excludes = re.compile(args.exclude)
+        print("Excluding: {0}".format(excludes.pattern))
+
+    if args.COMMAND != 'list':
+        t = setup_sftp(args)
+    else:
+        t = None
+
     try:
-        sftp = paramiko.SFTPClient.from_transport(t)
-        sync(sftp, path, os.path.join(os.getcwd(), os.path.basename(path)), cmd, excludes, args.dry_run, args.skip_on_error)
+        if args.COMMAND != 'list':
+            sftp = paramiko.SFTPClient.from_transport(t)
+        else:
+            sftp = None
+        sync(sftp, args.PATH, os.path.join(os.getcwd(), os.path.basename(args.PATH)), args.COMMAND, excludes, args.dry_run, args.skip_on_error)
     finally:
-        t.close()
+        if t:
+            t.close()
 
 if __name__ == '__main__':
     try:

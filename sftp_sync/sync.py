@@ -19,8 +19,12 @@ def load_rev_file(fname):
         with open(fname, "r") as fp:
             for line in fp:
                 parts = line.strip().split("\t")
-                files[parts[0]] = (int(parts[MTIME+1]), int(parts[SIZE+1]), int(parts[MODE+1]) if len(parts) > 3 else -1)
-    except:
+                try:
+                    fn = parts[0].decode('utf-8')
+                except UnicodeDecodeError:
+                    fn = parts[0]
+                files[fn] = (int(parts[MTIME+1]), int(parts[SIZE+1]), int(parts[MODE+1]) if len(parts) > 3 else -1)
+    except IOError:
         pass
     print("[\033[32m+\033[0m] Loaded %d files from %s" % (len(files), fname))
     return files
@@ -29,11 +33,16 @@ def load_rev_file(fname):
 def save_rev_file(fname, files):
     with open(fname, "w") as fp:
         for f, data in files.iteritems():
-            fp.write("%s\t%d\t%d\t%d\n" % (
+            try:
+                f = f.encode('utf-8')
+            except UnicodeDecodeError:
+                pass
+            line = ("%s\t%d\t%d\t%d\n" % (
                 f,
                 data[MTIME],
                 data[SIZE],
                 data[MODE]))
+            fp.write(line)
     print("[\033[32m+\033[0m] Saved %d files to %s" % (len(files), fname))
 
 
@@ -89,6 +98,8 @@ def check_dir(sftp, root, path, dryrun=False):
         s = None
         try:
             s = sftp.lstat(curpath)
+        except KeyboardInterrupt:
+            raise
         except:
             pass
 
@@ -101,6 +112,9 @@ def check_dir(sftp, root, path, dryrun=False):
 def sync(sftp, remote, local, direction='down', exclude=None, dry_run=False, skip_on_error=False):
     if direction == 'check':
         check_revision_against_remote(sftp, remote, local)
+        return
+    elif direction == 'list':
+        list_local_changes(sftp, remote, local, exclude, dry_run)
         return
         
     print ("[\033[34m*\033[0m] Syncing %s <-> %s" % (remote, local))
@@ -155,7 +169,7 @@ def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
     for root, dirs, files in walk(sftp, remote):
         lroot = os.path.join(local, root)
         if exclude and exclude.match(lroot):
-            print("[\033[33m#\033[0m] Skipping {0}".format(lroot))
+            sys.stdout.write("\r[\033[33m#\033[0m] Skipping {0}".format(lroot))
             continue
 
         if not os.path.lexists(lroot) and not dry_run:
@@ -166,7 +180,7 @@ def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
 
             if exclude and exclude.match(filename) \
                or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo') \
-               or f.filename.startswith('.~'):
+               or f.filename.startswith('.~') or f.filename.startswith("~$"):
                 continue
 
             sys.stdout.write("\r\x1b[K[\033[34m*\033[0m] \033[33mTesting\033[0m %s" % (
@@ -272,7 +286,7 @@ def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
     sys.stdout.write("\n")
 
     for filename in local_files.keys():
-        if filename not in remote_files:
+        if filename not in remote_files and not (exclude and exclude.match(filename)):
             print("[\033[31m-\033[0m] Deleted file: %s" % filename)
             print(" Last mod time: %d\n Size: %d\n Mode: %o" % local_files[filename])
             if not dry_run and os.path.lexists(os.path.join(local, filename)):
@@ -311,7 +325,7 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
 
             if exclude and exclude.match(lfile) \
                or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo') \
-               or f.startswith('.~'):
+               or f.startswith('.~') or f.startswith("~$"):
                 continue
 
             rfile = os.path.join(remote, filename)
@@ -335,6 +349,8 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
                 try:
                     try:
                         rstat = sftp.lstat(rfile)
+                    except KeyboardInterrupt:
+                        raise
                     except:
                         pass
                     else:
@@ -406,12 +422,14 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
     sys.stdout.write("\n")
 
     for filename in remote_files.keys():
-        if filename not in local_files:
+        if filename not in local_files and not (exclude and exclude.match(filename)):
             print("[\033[31m-\033[0m] Deleted file locally: %s" % filename)
             print(" Last mod time: %d\n Size: %d\n Mode: %o" % remote_files[filename])
             if not dry_run:
                 try:
                     sftp.lstat(os.path.join(remote, filename))
+                except KeyboardInterrupt:
+                    raise
                 except:
                     print("Can't stat remote file. Maybe already deleted?")
                     del remote_files[filename]
@@ -472,3 +490,50 @@ def check_revision_against_remote(sftp, remote, local):
     for filename, ldata in local_files.items():
         print("[\033[33m!\033[0m] File only in revision file")
         print_file_info2(filename, ldata)
+
+
+def list_local_changes(sftp, remote, local, exclude, dry_run):
+    remote_files = load_rev_file(os.path.join(local, '.files'))
+    local_files = {}
+    for root, dirs, files in os.walk(local):
+        if exclude and exclude.match(root):
+            #print("[\033[33m#\033[0m] Skipping {0}".format(root))
+            continue
+
+        for d in dirs:
+            path = os.path.relpath(os.path.join(root, d), local)
+            if exclude and exclude.match(path):
+                continue
+
+        for f in files:
+            if f in ('.files',):
+                continue
+
+            lfile = os.path.join(root, f)
+            filename = os.path.relpath(lfile, local)
+            if filename.split(os.path.sep)[0] == os.path.curdir:
+                filename = filename[2:]
+
+            if exclude and exclude.match(lfile) \
+               or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo') \
+               or f.startswith('.~') or f.startswith("~$"):
+                continue
+
+            rfile = os.path.join(remote, filename)
+            s = os.lstat(lfile)
+            sys.stdout.flush()
+            local_files[filename] = (int(s.st_mtime), int(s.st_size), int(s.st_mode))
+
+            upload = False
+            if filename not in remote_files:
+                upload = True
+                print("New: {}".format(filename))
+            else:
+                lf = local_files[filename]
+                rf = remote_files[filename]
+                upload = different(sftp, filename, rf, lf, local, remote)
+                if upload:
+                    print("Changed: {}".format(filename))
+
+
+
