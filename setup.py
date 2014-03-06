@@ -10,7 +10,7 @@ config = {
     'url': 'https://github.com/bluec0re/python-sftpsync',
     'download_url': 'https://github.com/bluec0re/python-sftpsync/archive/master.zip',
     'author_email': 'coding@bluec0re.eu',
-    'version': '0.2.0',
+    'version': '0.3.0',
     'install_requires': ['paramiko'],
     'packages': ['sftp_sync'],
     'scripts': ['bin/sftpsync'],
