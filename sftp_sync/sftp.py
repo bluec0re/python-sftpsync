@@ -32,7 +32,7 @@ def agent_auth(transport, username):
 
 def manual_auth(username, hostname, t):
     default_auth = 'p'
-    auth = raw_input('[\033[36m?\033[0m] Auth by (p)assword, (r)sa key, or (d)ss key? [%s] ' % default_auth)
+    auth = raw_input('[\033[36m?\033[0m] Auth by (p)assword, (r)sa key, or (d)sa key? [%s] ' % default_auth)
     if len(auth) == 0:
         auth = default_auth
 
@@ -49,13 +49,13 @@ def manual_auth(username, hostname, t):
         t.auth_publickey(username, key)
     elif auth == 'd':
         default_path = os.path.join(os.environ['HOME'], '.ssh', 'id_dsa')
-        path = raw_input('DSS key [%s]: ' % default_path)
+        path = raw_input('DSA/DSS key [%s]: ' % default_path)
         if len(path) == 0:
             path = default_path
         try:
             key = paramiko.DSSKey.from_private_key_file(path)
         except paramiko.PasswordRequiredException:
-            password = getpass.getpass('DSS key password: ')
+            password = getpass.getpass('DSA/DSS key password: ')
             key = paramiko.DSSKey.from_private_key_file(path, password)
         t.auth_publickey(username, key)
     else:
