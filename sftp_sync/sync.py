@@ -13,16 +13,22 @@ MTIME = 0
 SIZE = 1
 MODE = 2
 
+def to_unicode(s):
+    try:
+        return s.decode('ascii')
+    except UnicodeError:
+        try:
+            return s.decode('utf-8')
+        except UnicodeError:
+            return s
+
 def load_rev_file(fname):
     files = {}
     try:
         with open(fname, "r") as fp:
             for line in fp:
                 parts = line.strip().split("\t")
-                try:
-                    fn = parts[0].decode('utf-8')
-                except UnicodeDecodeError:
-                    fn = parts[0]
+                fn = to_unicode(parts[0])
                 files[fn] = (int(parts[MTIME+1]), int(parts[SIZE+1]), int(parts[MODE+1]) if len(parts) > 3 else -1)
     except IOError:
         pass
@@ -46,7 +52,7 @@ def save_rev_file(fname, files):
     print("[\033[32m+\033[0m] Saved %d files to %s" % (len(files), fname))
 
 
-def build_rev_file(sftp, remoteroot, localroot, exclude, dry_run):
+def build_rev_file(sftp, remoteroot, localroot, exclude, dry_run, *args, **kwargs):
     fname = os.path.join(localroot, '.files')
     if os.path.lexists(fname):
         c = raw_input("[\033[33m?\033[0m] File already exists. Override?[y/n]").lower()
@@ -76,8 +82,10 @@ def build_rev_file(sftp, remoteroot, localroot, exclude, dry_run):
 
             sys.stdout.flush()
     for root, dirs, files in os.walk(localroot):
+        root = to_unicode(root)
         relroot = os.path.relpath(root, localroot)
         for f in files:
+            f = to_unicode(f)
             filename = os.path.join(relroot, f)
             s = os.lstat(os.path.join(root, f))
             local_files[filename] = (
@@ -109,24 +117,27 @@ def check_dir(sftp, root, path, dryrun=False):
                 sftp.mkdir(curpath)
 
 
-def sync(sftp, remote, local, direction='down', exclude=None, dry_run=False, skip_on_error=False):
+def sync(sftp, remote, local, direction='down', exclude=None, dry_run=False, skip_on_error=False, subdir=None):
     if direction == 'check':
         check_revision_against_remote(sftp, remote, local)
         return
     elif direction == 'list':
         list_local_changes(sftp, remote, local, exclude, dry_run)
         return
-        
-    print ("[\033[34m*\033[0m] Syncing %s <-> %s" % (remote, local))
+
+    if subdir:
+        print ("[\033[34m*\033[0m] Syncing %s <-> %s with subdir %s" % (remote, local, subdir))
+    else:
+        print ("[\033[34m*\033[0m] Syncing %s <-> %s" % (remote, local))
     c = raw_input("Continue?[y/n]").lower()
     if c != 'y':
         return False
     cmds = {'down' : sync_down, 'up' :sync_up, 'init' : build_rev_file}
     if direction == 'both':
-        cmds['down'](sftp, remote, local, exclude, dry_run, skip_on_error)
-        cmds['up'](sftp, remote, local, exclude, dry_run, skip_on_error)
+        cmds['down'](sftp, remote, local, exclude, dry_run, skip_on_error, subdir)
+        cmds['up'](sftp, remote, local, exclude, dry_run, skip_on_error, subdir)
     else:
-        return cmds[direction](sftp, remote, local, exclude, dry_run, skip_on_error)
+        return cmds[direction](sftp, remote, local, exclude, dry_run, skip_on_error, subdir)
 
 
 def print_file_info(filename, f):
@@ -141,6 +152,7 @@ def print_file_info2(filename, f):
 def different(sftp, filename, other, current, local, remote):
     if other[MODE] & 0o777000 != current[MODE] & 0o777000 and other[MODE] != -1:
         print("\n[\033[32m+\033[0m] Differencees in %s" % filename)
+        print("         dst vs src")
         print("    Mode: %o vs %o" % (other[MODE], current[MODE]))
         return True
     elif stat.S_ISLNK(other[MODE]): # symlink
@@ -148,26 +160,33 @@ def different(sftp, filename, other, current, local, remote):
         ltarget = os.readlink(os.path.join(local, filename))
         if ltarget != rtarget:
             print("\n[\033[32m+\033[0m] Differencees in %s" % filename)
+            print("         dst vs src")
             print("    Target: %s vs %s" % (ltarget, rtarget))
             return True
 
     elif (other[MTIME] < current[MTIME] or
         (other[MTIME] == current[MTIME] and other[SIZE] != current[SIZE])):
         print("\n[\033[32m+\033[0m] Differencees in %s" % filename)
+        print("         dst vs src")
         print("    Time: %r vs %r" % (other[MTIME], current[MTIME]))
         print("    Size: %r vs %r" % (other[SIZE], current[SIZE]))
         return True
     return False
 
 
-def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
+def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error, subdir=None):
+    if not subdir:
+        subdir = ''
+
     if not os.path.lexists(local):
         os.mkdir(local)
     local_files = load_rev_file(os.path.join(local, '.files'))
     remote_files = {}
+    newlocal = os.path.join(local, subdir)
+    newremote = os.path.join(remote, subdir)
 
-    for root, dirs, files in walk(sftp, remote):
-        lroot = os.path.join(local, root)
+    for root, dirs, files in walk(sftp, newremote):
+        lroot = os.path.join(newlocal, root)
         if exclude and exclude.match(lroot):
             sys.stdout.write("\r[\033[33m#\033[0m] Skipping {0}".format(lroot))
             continue
@@ -177,6 +196,8 @@ def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
 
         for f in files:
             filename = os.path.join(root, f.filename)
+            if subdir:
+                filename = os.path.join(subdir, filename)
 
             if exclude and exclude.match(filename) \
                or filename[-1] == '~' or filename.endswith('.swp') or filename.endswith('.swo') \
@@ -286,35 +307,56 @@ def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error):
     sys.stdout.write("\n")
 
     for filename in local_files.keys():
+        if subdir:
+            if not filename.startswith(subdir):
+                continue
         if filename not in remote_files and not (exclude and exclude.match(filename)):
             print("[\033[31m-\033[0m] Deleted file: %s" % filename)
             print(" Last mod time: %d\n Size: %d\n Mode: %o" % local_files[filename])
-            if not dry_run and os.path.lexists(os.path.join(local, filename)):
+            if not dry_run:
+                if not os.path.lexists(os.path.join(local, filename)):
+                    print("[\033[36m?\033[0m] Already deleted?")
+                    del local_files[filename]
+                    continue
+
                 answer = raw_input("[\033[36m?\033[0m] Delete it locally?[y/n]")
                 if answer == 'y':
                     os.unlink(os.path.join(local, filename))
+                    del local_files[filename]
+
+    remote_files.update(local_files)
 
     if not dry_run:
         save_rev_file(os.path.join(local, '.files'), remote_files)
 
 
-def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
-    sftp.lstat(remote)
+def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error, subdir=None):
+    if subdir:
+        newlocal = os.path.join(local, subdir)
+        newremote = os.path.join(remote, subdir)
+    else:
+        newlocal = local
+        newremote = remote
+
+    sftp.lstat(newremote)
 
     remote_files = load_rev_file(os.path.join(local, '.files'))
     local_files = {}
-    for root, dirs, files in os.walk(local):
+    for root, dirs, files in os.walk(newlocal):
+        root = to_unicode(root)
         if exclude and exclude.match(root):
             #print("[\033[33m#\033[0m] Skipping {0}".format(root))
             continue
 
         for d in dirs:
-            path = os.path.relpath(os.path.join(root, d), local)
+            d = to_unicode(d)
+            path = os.path.relpath(os.path.join(root, d), newlocal)
             if exclude and exclude.match(path):
                 continue
-            check_dir(sftp, remote, path, dry_run)
+            check_dir(sftp, newremote, path, dry_run)
 
         for f in files:
+            f = to_unicode(f)
             if f in ('.files',):
                 continue
 
@@ -422,6 +464,9 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error):
     sys.stdout.write("\n")
 
     for filename in remote_files.keys():
+        if subdir:
+            if not filename.startswith(subdir):
+                continue
         if filename not in local_files and not (exclude and exclude.match(filename)):
             print("[\033[31m-\033[0m] Deleted file locally: %s" % filename)
             print(" Last mod time: %d\n Size: %d\n Mode: %o" % remote_files[filename])
@@ -496,16 +541,19 @@ def list_local_changes(sftp, remote, local, exclude, dry_run):
     remote_files = load_rev_file(os.path.join(local, '.files'))
     local_files = {}
     for root, dirs, files in os.walk(local):
+        root = to_unicode(root)
         if exclude and exclude.match(root):
             #print("[\033[33m#\033[0m] Skipping {0}".format(root))
             continue
 
         for d in dirs:
+            d = to_unicode(d)
             path = os.path.relpath(os.path.join(root, d), local)
             if exclude and exclude.match(path):
                 continue
 
         for f in files:
+            f = to_unicode(f)
             if f in ('.files',):
                 continue
 
@@ -534,6 +582,3 @@ def list_local_changes(sftp, remote, local, exclude, dry_run):
                 upload = different(sftp, filename, rf, lf, local, remote)
                 if upload:
                     print("Changed: {}".format(filename))
-
-
-

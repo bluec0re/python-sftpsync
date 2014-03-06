@@ -64,6 +64,7 @@ def main():
     parser.add_argument('-e', '--exclude', help='exclude files based on regex')
     parser.add_argument('-n', '--dry-run', help='dry run', action="store_true")
     parser.add_argument('-s', '--skip-on-error', help='skip file on error', action="store_true")
+    parser.add_argument('-S', '--subdir', help='restrict to subdir')
 
     args = parser.parse_args()
 
@@ -82,7 +83,7 @@ def main():
             sftp = paramiko.SFTPClient.from_transport(t)
         else:
             sftp = None
-        sync(sftp, args.PATH, os.path.join(os.getcwd(), os.path.basename(args.PATH)), args.COMMAND, excludes, args.dry_run, args.skip_on_error)
+        sync(sftp, args.PATH, os.path.join(os.getcwd(), os.path.basename(args.PATH)), args.COMMAND, excludes, args.dry_run, args.skip_on_error, args.subdir)
     finally:
         if t:
             t.close()
