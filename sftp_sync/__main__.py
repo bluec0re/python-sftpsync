@@ -46,7 +46,7 @@ def setup_sftp(args):
         except IOError:
             print('*** Unable to open host keys file')
             host_keys = {}
-    if host_keys.has_key(hostname):
+    if hostname in host_keys:
         hostkeytype = host_keys[hostname].keys()[0]
         hostkey = host_keys[hostname][hostkeytype]
         print('Using host key of type %s' % hostkeytype)

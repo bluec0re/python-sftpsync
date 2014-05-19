@@ -60,7 +60,7 @@ def build_rev_file(sftp, remoteroot, localroot, exclude, dry_run, *args, **kwarg
             return False
     remote_files = {}
     local_files = {}
-    for root, dirs, files in walk(sftp, remoteroot):
+    for root, dirs, files in walk(sftp, remoteroot, exclude):
         for f in files:
             filename = os.path.join(root, f.filename)
             if exclude and exclude.match(filename) \
@@ -185,7 +185,7 @@ def sync_down(sftp, remote, local, exclude, dry_run, skip_on_error, subdir=None)
     newlocal = os.path.join(local, subdir)
     newremote = os.path.join(remote, subdir)
 
-    for root, dirs, files in walk(sftp, newremote):
+    for root, dirs, files in walk(sftp, newremote, exclude):
         lroot = os.path.join(newlocal, root)
         if exclude and exclude.match(lroot):
             sys.stdout.write("\r[\033[33m#\033[0m] Skipping {0}".format(lroot))
@@ -489,10 +489,12 @@ def sync_up(sftp, remote, local, exclude, dry_run, skip_on_error, subdir=None):
         save_rev_file(os.path.join(local, '.files'), remote_files)
 
 
-def walk(sftp, root_directory):
+def walk(sftp, root_directory, exclude=None):
     dirs = [root_directory]
     while dirs:
         directory = dirs.pop()
+        if exclude and exclude.match(directory):
+            continue
         entries = sftp.listdir_attr(directory)
         files = []
         directories = []
