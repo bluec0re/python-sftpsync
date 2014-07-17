@@ -1,4 +1,4 @@
-from __future__ import print_function
+from __future__ import print_function, absolute_import
 
 from binascii import hexlify
 import getpass
@@ -22,7 +22,8 @@ def agent_auth(transport, username):
         return
 
     for key in agent_keys:
-        print('[\033[34m*\033[0m] Trying ssh-agent key %s' % hexlify(key.get_fingerprint()), end="")
+        print('[\033[34m*\033[0m] Trying ssh-agent key %s' %
+              hexlify(key.get_fingerprint()), end="")
         try:
             transport.auth_publickey(username, key)
             print('... \033[32msuccess!\033[0m')
@@ -31,6 +32,15 @@ def agent_auth(transport, username):
             print('... \033[31mnope.\033[0m')
 
 def manual_auth(username, hostname, t):
+    """
+    Attempt to authenticate manually
+
+    Keyword arguments:
+    username --
+    hostname --
+    t -- paramiko.Transport
+
+    """
     default_auth = 'p'
     auth = raw_input('[\033[36m?\033[0m] Auth by (p)assword, (r)sa key, or (d)sa key? [%s] ' % default_auth)
     if len(auth) == 0:
@@ -63,7 +73,18 @@ def manual_auth(username, hostname, t):
         t.auth_password(username, pw)
 
 
-def connect(hostname, port, username, hostkey):
+def connect(hostname, port, username):
+    """
+    Connect to the given host and port, first attempt is by using
+    a ssh agent, second attempt is manual auth
+
+    Keyword arguments:
+    hostname --
+    port --
+    username --
+    hostkey --
+
+    """
     t = paramiko.Transport((hostname, port))
     t.use_compression()
     t.start_client()

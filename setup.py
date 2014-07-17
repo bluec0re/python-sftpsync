@@ -11,7 +11,10 @@ config = {
     'download_url': 'https://github.com/bluec0re/python-sftpsync/archive/master.zip',
     'author_email': 'coding@bluec0re.eu',
     'version': '0.3.1',
-    'install_requires': ['paramiko'],
+    'install_requires': ['paramiko', 'helperlib'],
+    'dependency_links': [
+        'git+https://github.com/bluec0re/python-helperlib.git#egg=helperlib'
+    ],
     'packages': ['sftp_sync'],
     'scripts': ['bin/sftpsync'],
     'name': 'sftp_sync'
