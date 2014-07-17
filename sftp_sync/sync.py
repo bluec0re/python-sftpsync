@@ -1,4 +1,5 @@
-from __future__ import print_function, absolute_import, division
+#  vim: set ts=8 sw=4 tw=0 fileencoding=utf-8 filetype=python expandtab:
+from __future__ import print_function, absolute_import, division, unicode_literals
 
 from datetime import timedelta
 import sys
@@ -24,6 +25,13 @@ File = namedtuple('File', ('mtime', 'size', 'mode'))
 
 
 def to_unicode(s):
+    if sys.version_info >= (3, 0, 0):
+        if isinstance(s, str):
+            return s
+    else:
+        if isinstance(s, unicode):
+            return s
+
     try:
         return s.decode('ascii')
     except UnicodeError:
@@ -37,7 +45,7 @@ def string_shortener(string, max_len=50):
     if len(string) <= max_len:
         return string
 
-    return string[:max_len//2-2] + '...' + string[max_len//2-1]
+    return string[:max_len//2-2] + '...' + string[-max_len//2-1:]
 
 
 def print_file_info(filename, f):
