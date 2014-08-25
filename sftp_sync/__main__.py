@@ -6,7 +6,6 @@ from helperlib.exception import install_hook
 from helperlib.logging import ColorFormatter
 
 import paramiko
-import sys
 import os
 import getpass
 import argparse
@@ -15,6 +14,7 @@ import re
 from .sftp import connect
 from .sync import sync
 import logging
+
 
 def setup_sftp(args):
     """
@@ -29,8 +29,6 @@ def setup_sftp(args):
     if hostname.find(':') >= 0:
         hostname, portstr = hostname.split(':')
         port = int(portstr)
-
-
 
     # get username
     if username == '':

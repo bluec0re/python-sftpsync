@@ -9,7 +9,6 @@ import paramiko
 __author__ = 'bluec0re'
 
 
-
 def agent_auth(transport, username):
     """
     Attempt to authenticate to the given transport using any of the private
@@ -30,6 +29,7 @@ def agent_auth(transport, username):
             return
         except paramiko.SSHException:
             print('... \033[31mnope.\033[0m')
+
 
 def manual_auth(username, hostname, t):
     """
