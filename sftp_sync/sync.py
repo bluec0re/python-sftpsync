@@ -1,4 +1,5 @@
-from __future__ import print_function, absolute_import, division
+# vim: set ts=8 sw=4 tw=0 fileencoding=utf-8 filetype=python expandtab:
+from __future__ import print_function, absolute_import, division, unicode_literals
 
 from datetime import timedelta
 import sys
@@ -6,7 +7,6 @@ import os
 import stat
 import time
 from collections import namedtuple
-import logging
 from helperlib import prompt, info, success, error, warning, spinner
 from helperlib.logging import scope_logger
 
@@ -14,7 +14,6 @@ import paramiko
 import re
 
 __author__ = 'bluec0re'
-
 
 MTIME = 0
 SIZE = 1
@@ -24,6 +23,13 @@ File = namedtuple('File', ('mtime', 'size', 'mode'))
 
 
 def to_unicode(s):
+    if sys.version_info >= (3, 0, 0):
+        if isinstance(s, str):
+            return s
+    else:
+        if isinstance(s, unicode):
+            return s
+
     try:
         return s.decode('ascii')
     except UnicodeError:
@@ -37,21 +43,21 @@ def string_shortener(string, max_len=50):
     if len(string) <= max_len:
         return string
 
-    return string[:max_len//2-2] + '...' + string[max_len//2-1]
+    return string[:max_len // 2 - 2] + '...' + string[-max_len // 2 - 1:]
 
 
 def print_file_info(filename, f):
     print()
     success("New file: %s" % filename)
-    print("  Size: %d\n  UID: %d\n  GID: %d\n  Mode: %o\n  Accesstime: %d\n  Modtime: %d" %(
-          f.st_size, f.st_uid, f.st_gid, f.st_mode, f.st_atime, f.st_mtime))
+    print("  Size: %d\n  UID: %d\n  GID: %d\n  Mode: %o\n  Accesstime: %d\n  Modtime: %d" % (
+        f.st_size, f.st_uid, f.st_gid, f.st_mode, f.st_atime, f.st_mtime))
 
 
 def print_file_info2(filename, f):
     print()
     success("File: %s" % filename)
-    print("  Size: %d\n  Mode: %o\n  Modtime: %d" %(
-          f[SIZE], f[MODE], f[MTIME]))
+    print("  Size: %d\n  Mode: %o\n  Modtime: %d" % (
+        f[SIZE], f[MODE], f[MTIME]))
 
 
 def different(sftp, filename, other, current, local, remote):
@@ -62,7 +68,7 @@ def different(sftp, filename, other, current, local, remote):
         print("         dst vs src")
         print("    Mode: %o vs %o" % (other[MODE], current[MODE]))
         return True
-    elif stat.S_ISLNK(other[MODE]): # symlink
+    elif stat.S_ISLNK(other[MODE]):  # symlink
         rtarget = sftp.readlink(os.path.join(remote, filename))
         ltarget = os.readlink(os.path.join(local, filename))
         if ltarget != rtarget:
@@ -73,7 +79,7 @@ def different(sftp, filename, other, current, local, remote):
             return True
 
     elif (other[MTIME] < current[MTIME] or
-        (other[MTIME] == current[MTIME] and other[SIZE] != current[SIZE])):
+          (other[MTIME] == current[MTIME] and other[SIZE] != current[SIZE])):
         print()
         success("Differences in %s" % filename)
         print("         dst vs src")
@@ -85,7 +91,6 @@ def different(sftp, filename, other, current, local, remote):
 
 @scope_logger
 class RevisionFile(dict):
-
     def __init__(self, fname):
         super(RevisionFile, self).__init__()
         self.fname = fname
@@ -104,23 +109,23 @@ class RevisionFile(dict):
 
         with open(self.fname, "r") as fp:
             for line in fp:
-                parts = line.strip().split("\t")
-                fn = to_unicode(parts[0])
+                parts = to_unicode(line.strip()).split("\t")
+                fn = parts[0]
                 self.add(fn, *parts[1:])
         self.log.info('Loaded %d files from %s', len(self), self.fname)
 
     def save(self):
         with open(self.fname, "w") as fp:
             for f, data in self.iteritems():
-                try:
-                    f = f.encode('utf-8')
-                except UnicodeDecodeError:
-                    pass
                 line = ("%s\t%d\t%d\t%d\n" % (
                     f,
                     data[MTIME],
                     data[SIZE],
                     data[MODE]))
+                try:
+                    line = line.encode('utf-8')
+                except UnicodeDecodeError:
+                    pass
                 fp.write(line)
         self.log.info('Saved %d files to %s', len(self), self.fname)
 
@@ -144,11 +149,11 @@ def save_rev_file(fname, files):
 class Sync(object):
     def __init__(self, sftp, remote, local, exclude=None, skip_on_error=False, subdir=None, dry_run=False):
         self.sftp = sftp
-        self.subdir = subdir or ''
+        self.subdir = to_unicode(subdir or '')
         self.remote_root = remote
-        self.local_root = local
-        self.local = os.path.join(local, self.subdir)
-        self.remote = os.path.join(remote, self.subdir)
+        self.local_root = to_unicode(local)
+        self.local = os.path.join(to_unicode(local), self.subdir)
+        self.remote = os.path.join(to_unicode(remote), self.subdir)
         self.exclude = exclude
         if isinstance(self.exclude, str):
             self.exclude = re.compile(self.exclude)
@@ -159,7 +164,7 @@ class Sync(object):
         self.revision_file = RevisionFile(fname)
         self.revision_file.load()
 
-    def build_rev_file(self, *args, **kwargs):
+    def build_rev_file(self):
         if not os.path.lexists(self.local_root):
             os.mkdir(self.local_root)
 
@@ -167,6 +172,7 @@ class Sync(object):
             c = prompt("File already exists. Override?[y/n]").lower()
             if c != 'y':
                 return False
+
         remote_files = {}
         local_files = {}
         spinner.waitfor('Searching remote')
@@ -186,7 +192,7 @@ class Sync(object):
         spinner.succeeded()
 
         spinner.waitfor('Searching local')
-        for root, dirs, files in os.walk(self.local):
+        for root, dirs, files in os.walk(self.local.encode('utf-8')):
             root = to_unicode(root)
             relroot = os.path.relpath(root, self.local)
             for f in files:
@@ -194,10 +200,10 @@ class Sync(object):
                 filename = os.path.join(relroot, f)
                 s = os.lstat(os.path.join(root, f))
                 local_files[filename] = File(
-                                             int(s.st_mtime),
-                                             int(s.st_size),
-                                             int(s.st_mode)
-                                            )
+                    int(s.st_mtime),
+                    int(s.st_size),
+                    int(s.st_mode)
+                )
                 spinner.status(string_shortener(filename))
         spinner.succeeded()
 
@@ -212,12 +218,17 @@ class Sync(object):
 
         basename = os.path.basename(path)
         if path[-1] == '~' or path.endswith('.swp') or path.endswith('.swo') \
-           or basename.startswith('.~') or basename.startswith("~$"):
+                or basename.startswith('.~') or basename.startswith("~$") \
+                or basename.endswith('.pyc') or basename.endswith('.pyo') \
+                or '__pycache__' in path:
             return True
 
         return False
 
     def check_dir(self, path):
+        if self._exclude(path):
+            return
+
         current_path = self.remote
         for segment in path.split('/'):
             current_path = os.path.join(current_path, segment)
@@ -229,7 +240,7 @@ class Sync(object):
             except:
                 pass
 
-            if not s:
+            if not s and not self._exclude(current_path):
                 print("  Creating directory %s" % current_path)
                 if not self.dry_run:
                     self.sftp.mkdir(current_path)
@@ -238,13 +249,23 @@ class Sync(object):
         directory_stack = [self.remote]
         while directory_stack:
             directory = directory_stack.pop()
-            if self._exclude(directory):
+            if self._exclude(os.path.relpath(directory, self.remote)):
                 continue
 
-            entries = self.sftp.listdir_attr(directory)
+            try:
+                entries = self.sftp.listdir_attr(directory)
+            except Exception as e:
+                if sys.version_info.major >= 3 and False:
+                    #raise IOError("Error during listing of %s" % directory) from e
+                    pass
+                else:
+                    raise IOError("Error during listing of %s: %s" % (directory, str(e)))
             files = []
             directories = []
             for entry in entries:
+                if self._exclude(os.path.relpath(os.path.join(directory, entry.filename), self.remote)):
+                    continue
+
                 if stat.S_IFMT(entry.st_mode) == stat.S_IFDIR:
                     directories.append(entry)
                 else:
@@ -266,20 +287,23 @@ class Sync(object):
 
     def check_revision_against_remote(self):
         for root, dirs, files in self.walk():
+            if self.subdir:
+                root = os.path.join(self.subdir, root)
+
             for f in files:
                 filename = os.path.join(root, f.filename)
-                rfile = os.path.join(self.remote, filename)
 
                 rdata = File(
-                        int(f.st_mtime),
-                        int(f.st_size),
-                        int(f.st_mode)
+                    int(f.st_mtime),
+                    int(f.st_size),
+                    int(f.st_mode)
                 )
 
                 if filename not in self.revision_file:
                     error("File only on remote")
                     print_file_info2(filename, rdata)
-                elif different(self.sftp, filename, rdata, self.revision_file[filename], self.local, self.remote):
+                elif different(self.sftp, filename, rdata, self.revision_file[filename], self.local_root,
+                               self.remote_root):
                     del self.revision_file[filename]
                 else:
                     del self.revision_file[filename]
@@ -288,16 +312,19 @@ class Sync(object):
             error("File only in revision file\n")
             print_file_info2(filename, ldata)
 
-    def list_local_changes(self, *args, **kwargs):
+    def list_local_changes(self):
         local_files = {}
-        for root, dirs, files in os.walk(self.local):
+        for root, dirs, files in os.walk(self.local.encode('utf-8')):
             root = to_unicode(root)
             if self._exclude(root):
                 continue
 
+            if self.subdir:
+                root = os.path.join(root, self.subdir)
+
             for d in dirs:
                 d = to_unicode(d)
-                path = os.path.relpath(os.path.join(root, d), self.local)
+                path = os.path.join(root, d)
                 if self._exclude(path):
                     continue
 
@@ -307,14 +334,13 @@ class Sync(object):
                     continue
 
                 lfile = os.path.join(root, f)
-                filename = os.path.relpath(lfile, self.local)
+                filename = os.path.relpath(lfile, self.local_root)
                 if filename.split(os.path.sep)[0] == os.path.curdir:
                     filename = filename[2:]
 
                 if self._exclude(lfile):
                     continue
 
-                rfile = os.path.join(self.remote, filename)
                 s = os.lstat(lfile)
                 sys.stdout.flush()
                 local_files[filename] = File(int(s.st_mtime),
@@ -326,25 +352,23 @@ class Sync(object):
                 else:
                     lf = local_files[filename]
                     rf = self.revision_file[filename]
-                    if different(self.sftp, filename, rf, lf, self.local, self.remote):
+                    if different(self.sftp, filename, rf, lf, self.local_root, self.remote_root):
                         print("Changed: {}".format(filename))
 
     def _check_local(self, lfile, lfilename, rfile, rfilename):
         if os.path.lexists(lfilename):
-            stat = os.lstat(lfilename)
-            mtime, size = map(int, (stat.st_mtime, stat.st_size))
+            stats = os.lstat(lfilename)
+            mtime, size = map(int, (stats.st_mtime, stats.st_size))
             if lfile and mtime != lfile.mtime:
                 if lfile.mtime != rfile.mtime and mtime != rfile.mtime:
                     raise ValueError("Conflict with file %s (Both modified (different timestamp))" % rfilename)
             if mtime > rfile.mtime:
                 raise ValueError("Conflict with file %s (local file is newer)" % rfilename)
 
-            if (size != rfile.size and
-                mtime == rfile.mtime):
+            if size != rfile.size and mtime == rfile.mtime:
                 raise ValueError("Conflict with file %s (size differs)" % rfilename)
 
-            if (mtime == rfile.mtime and
-                size == rfile.size):
+            if mtime == rfile.mtime and size == rfile.size:
                 print()
                 success("Already downloaded\n")
                 return False
@@ -380,10 +404,10 @@ class Sync(object):
                 spinner.status(string_shortener(filename))
 
                 remote_files[filename] = File(
-                                              int(f.st_mtime),
-                                              int(f.st_size),
-                                              int(f.st_mode)
-                                             )
+                    int(f.st_mtime),
+                    int(f.st_size),
+                    int(f.st_mode)
+                )
 
                 if filename not in revision_file:
                     print_file_info(filename, f)
@@ -401,7 +425,9 @@ class Sync(object):
 
                     try:
 
-                        if not self._check_local(revision_file.get(filename), lfilename, remote_files[filename], filename):
+                        if not self._check_local(revision_file.get(filename), lfilename, remote_files[filename],
+                                                 filename):
+                            spinner.waitfor('Testing')
                             continue
                         start = time.time()
 
@@ -410,15 +436,15 @@ class Sync(object):
                                 return
 
                             speed = total / (time.time() - start) * 1.0
-                            if speed > 1024**2:
-                                speed = "%.2f MiByte/s" % (speed / 1024**2,)
+                            if speed > 1024 ** 2:
+                                speed = "%.2f MiByte/s" % (speed / 1024 ** 2,)
                             elif speed > 1024:
                                 speed = "%.2f KiByte/s" % (speed / 1024,)
                             else:
                                 speed = "%f Byte/s" % speed
 
                             sys.stdout.write("\r%02d%% %d/%d %s" % (
-                                total * 100/size, total, size, speed))
+                                total * 100 / size, total, size, speed))
                             sys.stdout.flush()
 
                         if not self.dry_run:
@@ -429,7 +455,7 @@ class Sync(object):
                                 try:
                                     os.symlink(target, lfilename)
                                 except OSError as e:
-                                    error("Failed: %s\n" % (e))
+                                    error("Failed: %s\n" % (e,))
                             else:
                                 self.sftp.get(rfilename, lfilename, status)
                                 os.utime(lfilename, (mtime, mtime))
@@ -460,7 +486,7 @@ class Sync(object):
                                 revision_file.save()
                             raise
                         else:
-                            if filename in revision_file: # prevent deletion
+                            if filename in revision_file:  # prevent deletion
                                 remote_files[filename] = revision_file[filename]
                             error("Error during downloading %s: %s\n" % (filename, str(e)))
         spinner.succeeded()
@@ -494,7 +520,7 @@ class Sync(object):
 
         local_files = {}
         spinner.waitfor('Testing')
-        for root, dirs, files in os.walk(self.local):
+        for root, dirs, files in os.walk(self.local.encode('utf-8')):
             root = to_unicode(root)
             if self._exclude(root):
                 continue
@@ -528,7 +554,6 @@ class Sync(object):
 
                 local_files[filename] = File(int(s.st_mtime), int(s.st_size), int(s.st_mode))
 
-                upload = False
                 if filename not in self.revision_file:
                     print_file_info(filename, s)
                     upload = True
@@ -558,8 +583,8 @@ class Sync(object):
                                 return
 
                             speed = total / (time.time() - start) * 1.0
-                            if speed > 1024**2:
-                                speeds = "%.2f MiByte/s" % (speed / 1024**2,)
+                            if speed > 1024 ** 2:
+                                speeds = "%.2f MiByte/s" % (speed / 1024 ** 2,)
                             elif speed > 1024:
                                 speeds = "%.2f KiByte/s" % (speed / 1024,)
                             else:
@@ -567,7 +592,7 @@ class Sync(object):
                             remaining = timedelta(seconds=int((size - total) / speed))
 
                             sys.stdout.write("\r%02d%% %d/%d %s %s" % (
-                                total * 100/size, total, size, speeds, remaining))
+                                total * 100 / size, total, size, speeds, remaining))
                             sys.stdout.flush()
 
                         if not self.dry_run:
@@ -612,7 +637,7 @@ class Sync(object):
                                 self.revision_file.save()
                             raise
                         else:
-                            if filename in self.revision_file: # prevent deletion
+                            if filename in self.revision_file:  # prevent deletion
                                 local_files[filename] = self.revision_file[filename]
                             error("Error during upload of %s: %s\n" % (filename, str(e)))
         spinner.succeeded()
