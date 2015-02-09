@@ -3,77 +3,16 @@ from __future__ import print_function, absolute_import
 from binascii import hexlify
 import getpass
 import os
-
 import paramiko
+import logging
 
 __author__ = 'bluec0re'
 
 
-def agent_auth(transport, username):
-    """
-    Attempt to authenticate to the given transport using any of the private
-    keys available from an SSH agent.
-    """
-
-    agent = paramiko.Agent()
-    agent_keys = agent.get_keys()
-    if len(agent_keys) == 0:
-        return
-
-    for key in agent_keys:
-        print('[\033[34m*\033[0m] Trying ssh-agent key %s' %
-              hexlify(key.get_fingerprint()), end="")
-        try:
-            transport.auth_publickey(username, key)
-            print('... \033[32msuccess!\033[0m')
-            return
-        except paramiko.SSHException:
-            print('... \033[31mnope.\033[0m')
+log = logging.getLogger(__name__)
 
 
-def manual_auth(username, hostname, t):
-    """
-    Attempt to authenticate manually
-
-    Keyword arguments:
-    username --
-    hostname --
-    t -- paramiko.Transport
-
-    """
-    default_auth = 'p'
-    auth = raw_input('[\033[36m?\033[0m] Auth by (p)assword, (r)sa key, or (d)sa key? [%s] ' % default_auth)
-    if len(auth) == 0:
-        auth = default_auth
-
-    if auth == 'r':
-        default_path = os.path.join(os.environ['HOME'], '.ssh', 'id_rsa')
-        path = raw_input('RSA key [%s]: ' % default_path)
-        if len(path) == 0:
-            path = default_path
-        try:
-            key = paramiko.RSAKey.from_private_key_file(path)
-        except paramiko.PasswordRequiredException:
-            password = getpass.getpass('RSA key password: ')
-            key = paramiko.RSAKey.from_private_key_file(path, password)
-        t.auth_publickey(username, key)
-    elif auth == 'd':
-        default_path = os.path.join(os.environ['HOME'], '.ssh', 'id_dsa')
-        path = raw_input('DSA/DSS key [%s]: ' % default_path)
-        if len(path) == 0:
-            path = default_path
-        try:
-            key = paramiko.DSSKey.from_private_key_file(path)
-        except paramiko.PasswordRequiredException:
-            password = getpass.getpass('DSA/DSS key password: ')
-            key = paramiko.DSSKey.from_private_key_file(path, password)
-        t.auth_publickey(username, key)
-    else:
-        pw = getpass.getpass('Password for %s@%s: ' % (username, hostname))
-        t.auth_password(username, pw)
-
-
-def connect(hostname, port, username):
+def connect(hostname, port, username, pkey=None, sock=None):
     """
     Connect to the given host and port, first attempt is by using
     a ssh agent, second attempt is manual auth
@@ -85,15 +24,75 @@ def connect(hostname, port, username):
     hostkey --
 
     """
-    t = paramiko.Transport((hostname, port))
-    t.use_compression()
-    t.start_client()
-    #t.connect(username=username, password=password, hostkey=hostkey)
-    agent_auth(t, username)
-    if not t.is_authenticated():
-        t.close()
-        t = paramiko.Transport((hostname, port))
-        t.use_compression()
-        t.start_client()
-        manual_auth(username, hostname, t)
-    return t
+    client = paramiko.SSHClient()
+    client.load_system_host_keys()
+
+    # auto add hostkey
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    password = None
+
+    while True:
+        try:
+            logging.getLogger('paramiko.transport').setLevel(logging.INFO)
+            client.connect(hostname, port, username, password, allow_agent=password is None, pkey=pkey, sock=sock)
+            break
+        except paramiko.BadHostKeyException as e:
+            log.critical("Host sends wrong hostkey. Got %s, expected %s",
+                         ':'.join("%02x" % ord(c) for c in e.args[1].get_fingerprint()),
+                         ':'.join("%02x" % ord(c) for c in e.args[2].get_fingerprint()))
+            return False
+        except paramiko.PasswordRequiredException as e:
+            log.error("Password required for %s@%s", username, hostname)
+            password = getpass.getpass("Password: ")
+            continue
+        except paramiko.SSHException as e:
+            if 'not found in known_hosts' in e.message:
+                log.critical("Host %s was not found in known_hosts file. Connect via ssh first", hostname)
+                return False
+            raise e
+        finally:
+            logging.getLogger('paramiko.transport').setLevel(logging.WARNING)
+    return client
+
+
+def setup_sftp(args):
+    """
+    Creates a sftp transport
+    """
+
+    # get hostname
+    username = None
+    port = None
+    pkey = None
+    sock = None
+    hostname = args.HOST
+    if hostname.find('@') >= 0:
+        username, hostname = hostname.split('@')
+    if hostname.find(':') >= 0:
+        hostname, portstr = hostname.split(':')
+        port = int(portstr)
+
+    if os.path.exists(os.path.expanduser('~/.ssh/config')):
+        with open(os.path.expanduser('~/.ssh/config')) as fp:
+            config = paramiko.SSHConfig()
+            config.parse(fp)
+
+            entry = config.lookup(hostname)
+            if entry:
+                if not port:
+                   port = entry.get('port', 22)
+                hostname = entry.get('hostname', hostname)
+                if username is None:
+                    username = entry.get('username')
+                pkey = entry.get('identityfile')
+                sock = entry.get('proxycommand')
+
+    # get username
+    if username is None:
+        default_username = getpass.getuser()
+        username = raw_input('Username [%s]: ' % default_username)
+        if len(username) == 0:
+            username = default_username
+
+    client = connect(hostname, port, username, pkey, sock)
+    return client

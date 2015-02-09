@@ -5,39 +5,16 @@ from __future__ import print_function, absolute_import
 from helperlib.exception import install_hook
 from helperlib.logging import ColorFormatter
 
-import paramiko
 import os
-import getpass
 import argparse
 import re
 
-from .sftp import connect
+from .sftp import setup_sftp
 from .sync import sync
 import logging
 
 
-def setup_sftp(args):
-    """
-    Creates a sftp transport
-    """
-    # get hostname
-    username = ''
-    hostname = args.HOST
-    if hostname.find('@') >= 0:
-        username, hostname = hostname.split('@')
-    port = 22
-    if hostname.find(':') >= 0:
-        hostname, portstr = hostname.split(':')
-        port = int(portstr)
 
-    # get username
-    if username == '':
-        default_username = getpass.getuser()
-        username = raw_input('Username [%s]: ' % default_username)
-        if len(username) == 0:
-            username = default_username
-
-    return connect(hostname, port, username)
 
 
 def main():
@@ -69,16 +46,16 @@ def main():
         excludes = re.compile(args.exclude)
         print("Excluding: {0}".format(excludes.pattern))
 
+    sftp = None
+    client = None
     if args.COMMAND != 'list':
-        transport = setup_sftp(args)
-    else:
-        transport = None
+        client = setup_sftp(args)
+        sftp = client.open_sftp()
 
     try:
-        if args.COMMAND != 'list':
-            sftp = paramiko.SFTPClient.from_transport(transport)
-        else:
-            sftp = None
+        if sftp is False:
+            exit(1)
+
         sync(sftp,
              args.PATH,
              os.path.join(os.getcwd(), os.path.basename(args.PATH)),
@@ -88,8 +65,8 @@ def main():
              args.skip_on_error,
              args.subdir)
     finally:
-        if transport:
-            transport.close()
+        if client:
+            client.close()
 
 if __name__ == '__main__':
     install_hook()
