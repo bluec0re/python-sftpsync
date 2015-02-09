@@ -218,7 +218,9 @@ class Sync(object):
 
         basename = os.path.basename(path)
         if path[-1] == '~' or path.endswith('.swp') or path.endswith('.swo') \
-                or basename.startswith('.~') or basename.startswith("~$"):
+                or basename.startswith('.~') or basename.startswith("~$") \
+                or basename.endswith('.pyc') or basename.endswith('.pyo') \
+                or '__pycache__' in path:
             return True
 
         return False
@@ -238,7 +240,7 @@ class Sync(object):
             except:
                 pass
 
-            if not s:
+            if not s and not self._exclude(current_path):
                 print("  Creating directory %s" % current_path)
                 if not self.dry_run:
                     self.sftp.mkdir(current_path)
@@ -247,13 +249,23 @@ class Sync(object):
         directory_stack = [self.remote]
         while directory_stack:
             directory = directory_stack.pop()
-            if self._exclude(directory):
+            if self._exclude(os.path.relpath(directory, self.remote)):
                 continue
 
-            entries = self.sftp.listdir_attr(directory)
+            try:
+                entries = self.sftp.listdir_attr(directory)
+            except Exception as e:
+                if sys.version_info.major >= 3 and False:
+                    #raise IOError("Error during listing of %s" % directory) from e
+                    pass
+                else:
+                    raise IOError("Error during listing of %s: %s" % (directory, str(e)))
             files = []
             directories = []
             for entry in entries:
+                if self._exclude(os.path.relpath(os.path.join(directory, entry.filename), self.remote)):
+                    continue
+
                 if stat.S_IFMT(entry.st_mode) == stat.S_IFDIR:
                     directories.append(entry)
                 else:
