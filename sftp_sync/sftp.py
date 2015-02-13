@@ -83,8 +83,14 @@ def setup_sftp(args):
                    port = entry.get('port', 22)
                 hostname = entry.get('hostname', hostname)
                 if username is None:
-                    username = entry.get('username')
+                    username = entry.get('user')
                 pkey = entry.get('identityfile')
+                if pkey:
+                    try:
+                        pkey = paramiko.PKey.from_private_key_file(pkey)
+                    except paramiko.PasswordRequiredException:
+                        log.error("Password required for key %s", pkey)
+                        pkey = paramiko.PKey.from_private_key_file(pkey, getpass.getpass("Key Password: "))
                 sock = entry.get('proxycommand')
 
     # get username
