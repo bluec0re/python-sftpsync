@@ -10,7 +10,7 @@ config = {
     'url': 'https://github.com/bluec0re/python-sftpsync',
     'download_url': 'https://github.com/bluec0re/python-sftpsync/archive/master.zip',
     'author_email': 'coding@bluec0re.eu',
-    'version': '0.5.0',
+    'version': '0.5.1',
     'install_requires': ['paramiko', 'helperlib'],
     'dependency_links': [
         'git+https://github.com/bluec0re/python-helperlib.git#egg=helperlib'
