@@ -146,6 +146,7 @@ def save_rev_file(fname, files):
     files.save()
 
 
+@scope_logger
 class Sync(object):
     def __init__(self, sftp, remote, local, exclude=None, skip_on_error=False, subdir=None, dry_run=False):
         self.sftp = sftp
@@ -213,7 +214,9 @@ class Sync(object):
         self.revision_file.save()
 
     def _exclude(self, path):
+        self.log.debug("Testing for exclusion: %s (%s)", path, self.exclude.pattern)
         if self.exclude and self.exclude.match(path):
+            self.log.debug("Excluded by regex: %s", path)
             return True
 
         basename = os.path.basename(path)
@@ -221,6 +224,7 @@ class Sync(object):
                 or basename.startswith('.~') or basename.startswith("~$") \
                 or basename.endswith('.pyc') or basename.endswith('.pyo') \
                 or '__pycache__' in path:
+            self.log.debug("Excluded by default: %s", basename)
             return True
 
         return False
