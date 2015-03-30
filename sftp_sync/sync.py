@@ -6,6 +6,11 @@ import sys
 import os
 import stat
 import time
+try:
+    from configparser import ConfigParser
+except ImportError:
+    from ConfigParser import ConfigParser
+
 from collections import namedtuple
 from helperlib import prompt, info, success, error, warning, spinner
 from helperlib.logging import scope_logger
@@ -18,6 +23,13 @@ __author__ = 'bluec0re'
 MTIME = 0
 SIZE = 1
 MODE = 2
+
+DEFAULT_CONFIG = {
+    'general': {
+        #'exclude': None
+    },
+    #'<project name>': { }
+}
 
 File = namedtuple('File', ('mtime', 'size', 'mode'))
 
@@ -130,6 +142,34 @@ class RevisionFile(dict):
         self.log.info('Saved %d files to %s', len(self), self.fname)
 
 
+@scope_logger
+class SettingsFile(ConfigParser):
+    def __init__(self, fname, name):
+        if sys.version_info.major >= 3:
+            super(SettingsFile, self).__init__()
+        else:
+            ConfigParser.__init__(self)
+        self.fname = fname
+        self.name = name
+
+    def load(self):
+        for section in self.sections():
+            self.remove_section(section)
+
+        for section, options in DEFAULT_CONFIG.items():
+            for option, value in options.items():
+                self.set(section, option, value)
+
+        self.read(['/etc/sftpsync.cfg',
+                   os.path.expanduser('~/.config/sftpsync.cfg'),
+                   'sftpsync.cfg',
+                   self.fname])
+
+    def save(self):
+        with open(self.fname, 'w') as fp:
+            self.write(fp)
+
+
 def load_rev_file(fname):
     files = RevisionFile(fname)
     files.load()
@@ -146,8 +186,11 @@ def save_rev_file(fname, files):
     files.save()
 
 
+@scope_logger
 class Sync(object):
-    def __init__(self, sftp, remote, local, exclude=None, skip_on_error=False, subdir=None, dry_run=False):
+    def __init__(self, sftp, remote, local,
+                 exclude=None, skip_on_error=False,
+                 subdir=None, dry_run=False):
         self.sftp = sftp
         self.subdir = to_unicode(subdir or '')
         self.remote_root = remote
@@ -155,14 +198,40 @@ class Sync(object):
         self.local = os.path.join(to_unicode(local), self.subdir)
         self.remote = os.path.join(to_unicode(remote), self.subdir)
         self.exclude = exclude
-        if isinstance(self.exclude, str):
-            self.exclude = re.compile(self.exclude)
         self.skip_on_error = skip_on_error
         self.dry_run = dry_run
 
         fname = os.path.join(self.local_root, '.files')
         self.revision_file = RevisionFile(fname)
         self.revision_file.load()
+        fname = os.path.join(self.local_root, '.sftpsync')
+        name = os.path.basename(self.local_root)
+        self.settings = SettingsFile(fname, name)
+        self.settings.load()
+
+        extra_pattern = None
+        if self.settings.has_option('general', 'exclude'):
+            extra_pattern = self.settings.get('general', 'exclude')
+
+        if self.settings.has_option(name, 'exclude'):
+            if extra_pattern:
+                extra_pattern = '(%s)|(%s)' % (extra_pattern, self.settings.get(name, 'exclude'))
+            else:
+                extra_pattern = self.settings.get(name, 'exclude')
+
+        orig = self.exclude
+        if hasattr(orig, 'pattern'):
+            orig = orig.pattern
+
+        if extra_pattern:
+            self.log.warning("Loaded exclude pattern %s from settings file", extra_pattern)
+            if orig:
+                self.exclude = '(%s)|(%s)' % (orig, extra_pattern)
+            else:
+                self.exclude = extra_pattern
+
+        if isinstance(self.exclude, str):
+            self.exclude = re.compile(self.exclude)
 
     def build_rev_file(self):
         if not os.path.lexists(self.local_root):
@@ -213,14 +282,18 @@ class Sync(object):
         self.revision_file.save()
 
     def _exclude(self, path):
-        if self.exclude and self.exclude.match(path):
-            return True
+        if self.exclude:
+            self.log.debug("Testing for exclusion: %s (%s)", path, self.exclude.pattern)
+            if self.exclude.match(path):
+                self.log.debug("Excluded by regex: %s", path)
+                return True
 
         basename = os.path.basename(path)
         if path[-1] == '~' or path.endswith('.swp') or path.endswith('.swo') \
                 or basename.startswith('.~') or basename.startswith("~$") \
                 or basename.endswith('.pyc') or basename.endswith('.pyo') \
                 or '__pycache__' in path:
+            self.log.debug("Excluded by default: %s", basename)
             return True
 
         return False
@@ -302,8 +375,8 @@ class Sync(object):
                 if filename not in self.revision_file:
                     error("File only on remote")
                     print_file_info2(filename, rdata)
-                elif different(self.sftp, filename, rdata, self.revision_file[filename], self.local_root,
-                               self.remote_root):
+                elif different(self.sftp, filename, rdata, self.revision_file[filename],
+                               self.local_root, self.remote_root):
                     del self.revision_file[filename]
                 else:
                     del self.revision_file[filename]
@@ -415,7 +488,8 @@ class Sync(object):
                 else:
                     lfile = revision_file[filename]
                     rfile = remote_files[filename]
-                    download = different(self.sftp, filename, lfile, rfile, self.local_root, self.remote_root)
+                    download = different(self.sftp, filename, lfile, rfile,
+                                         self.local_root, self.remote_root)
 
                 if download:
                     spinner.succeeded()
@@ -425,8 +499,8 @@ class Sync(object):
 
                     try:
 
-                        if not self._check_local(revision_file.get(filename), lfilename, remote_files[filename],
-                                                 filename):
+                        if not self._check_local(revision_file.get(filename), lfilename,
+                                                 remote_files[filename], filename):
                             spinner.waitfor('Testing')
                             continue
                         start = time.time()
@@ -560,7 +634,8 @@ class Sync(object):
                 else:
                     lf = local_files[filename]
                     rf = self.revision_file[filename]
-                    upload = different(self.sftp, filename, rf, lf, self.local_root, self.remote_root)
+                    upload = different(self.sftp, filename, rf, lf,
+                                       self.local_root, self.remote_root)
 
                 if upload:
                     spinner.succeeded()
@@ -668,7 +743,8 @@ class Sync(object):
             self.revision_file.save()
 
 
-def sync(sftp, remote, local, direction='down', exclude=None, dry_run=False, skip_on_error=False, subdir=None):
+def sync(sftp, remote, local, direction='down', exclude=None,
+         dry_run=False, skip_on_error=False, subdir=None):
     sync = Sync(sftp, remote, local, exclude, skip_on_error, subdir, dry_run)
     if direction == 'check':
         sync.check_revision_against_remote()
@@ -694,4 +770,3 @@ def sync(sftp, remote, local, direction='down', exclude=None, dry_run=False, ski
         return sync.up()
     elif direction == 'init':
         return sync.build_rev_file()
-
