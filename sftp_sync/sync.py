@@ -227,6 +227,7 @@ class Sync(object):
             self.log.warning("Loaded exclude pattern %s from settings file", extra_pattern)
             if orig:
                 self.exclude = '(%s)|(%s)' % (orig, extra_pattern)
+                self.log.warning("Using new pattern %s", self.exclude)
             else:
                 self.exclude = extra_pattern
 
