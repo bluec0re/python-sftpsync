@@ -230,8 +230,8 @@ class Sync(object):
             else:
                 self.exclude = extra_pattern
 
-        if isinstance(self.exclude, str):
-            self.exclude = re.compile(self.exclude)
+        if not hasattr(self.exclude, 'pattern'):
+            self.exclude = re.compile(str(self.exclude))
 
     def build_rev_file(self):
         if not os.path.lexists(self.local_root):
